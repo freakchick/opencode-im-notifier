@@ -22,6 +22,8 @@ opencode plugin opencode-im-notifier --global
 opencode plugin /path/to/opencode-im-notifier --global
 ```
 
+安装后会自动在 `~/.config/opencode/opencode-im-notifier.json` 生成示例配置文件，编辑它填入你的 webhook 地址即可使用。
+
 ## 配置
 
 配置有两种方式：**单独配置文件**（推荐）或 **opencode.jsonc 内联**。
