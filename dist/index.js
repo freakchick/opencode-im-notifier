@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { sendDingTalk } from "./notifiers/dingtalk.js";
@@ -89,6 +89,22 @@ const plugin = async (input, options) => {
         fileCfg = await loadConfigFile(p);
         if (fileCfg)
             break;
+    }
+    // 如果没有任何配置文件，自动生成全局配置
+    if (!fileCfg && (!inline.dingtalk && !inline.feishu && !inline.wecom)) {
+        const globalPath = join(homedir(), ".config", "opencode", CONFIG_FILENAME);
+        try {
+            await mkdir(join(homedir(), ".config", "opencode"), { recursive: true });
+            await writeFile(globalPath, JSON.stringify({
+                dingtalk: { enable: true, webhook: "https://oapi.dingtalk.com/robot/send?access_token=你的token", secret: "你的加签密钥（可选）" },
+                feishu: { enable: true, webhook: "https://open.feishu.cn/open-apis/bot/v2/hook/你的webhook" },
+                wecom: { enable: true, webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key" },
+                notifyOn: ["idle", "permission", "question"],
+                title: "",
+            }, null, 2) + "\n", "utf-8");
+            console.error("[opencode-im-notifier] config file created:", globalPath);
+        }
+        catch { /* ignore */ }
     }
     const config = mergeConfig(fileCfg, inline);
     const notifyOn = new Set(config.notifyOn ?? ["idle", "permission", "question"]);
