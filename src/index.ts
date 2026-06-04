@@ -1,6 +1,6 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { homedir } from "node:os";
+import { homedir, hostname } from "node:os";
 import type { Plugin } from "@opencode-ai/plugin";
 import type { NotifierConfig, NotificationMessage } from "./types.js";
 import { sendDingTalk } from "./notifiers/dingtalk.js";
@@ -157,6 +157,7 @@ const plugin: Plugin = async (input, options) => {
   const projectTitle = config.title && config.title.trim() !== ""
     ? config.title
     : (input.project?.worktree ? input.project.worktree.split("/").pop()! : "OpenCode");
+  const machineInfo = hostname();
   const client = input.client as unknown as Record<string, unknown>;
 
   return {
@@ -175,6 +176,7 @@ const plugin: Plugin = async (input, options) => {
               ``,
               `- **项目**：${projectTitle}`,
               `- **会话**：${sessionTitle}`,
+              `- **主机**：${machineInfo}`,
               `- **时间**：${formatTime()}`,
             ].join("\n"),
           });
@@ -196,6 +198,7 @@ const plugin: Plugin = async (input, options) => {
               `- **指令**：\`${patterns.join(" ")}\``,
               `- **项目**：${projectTitle}`,
               `- **会话**：${sessionTitle}`,
+              `- **主机**：${machineInfo}`,
             ].join("\n"),
           });
           return;
@@ -222,6 +225,7 @@ const plugin: Plugin = async (input, options) => {
               opts ? `- **选项**：${opts}` : "",
               `- **项目**：${projectTitle}`,
               `- **会话**：${sessionTitle}`,
+              `- **主机**：${machineInfo}`,
             ].filter(Boolean).join("\n"),
           });
           return;
