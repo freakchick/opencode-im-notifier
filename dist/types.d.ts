@@ -11,7 +11,7 @@ export interface WeComConfig {
     enable?: boolean;
     webhook: string;
 }
-export type NotifyEvent = "idle" | "permission" | "question";
+export type NotifyEvent = "idle" | "permission" | "question" | "error";
 export interface NotifierConfig {
     dingtalk?: DingTalkConfig;
     feishu?: FeishuConfig;

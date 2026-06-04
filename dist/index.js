@@ -99,7 +99,7 @@ const plugin = async (input, options) => {
                 dingtalk: { enable: true, webhook: "https://oapi.dingtalk.com/robot/send?access_token=你的token", secret: "你的加签密钥（可选）" },
                 feishu: { enable: true, webhook: "https://open.feishu.cn/open-apis/bot/v2/hook/你的webhook" },
                 wecom: { enable: true, webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key" },
-                notifyOn: ["idle", "permission", "question"],
+                notifyOn: ["idle", "permission", "question", "error"],
                 title: "",
             }, null, 2) + "\n", "utf-8");
             console.error("[opencode-im-notifier] config file created:", globalPath);
@@ -107,7 +107,7 @@ const plugin = async (input, options) => {
         catch { /* ignore */ }
     }
     const config = mergeConfig(fileCfg, inline);
-    const notifyOn = new Set(config.notifyOn ?? ["idle", "permission", "question"]);
+    const notifyOn = new Set(config.notifyOn ?? ["idle", "permission", "question", "error"]);
     const projectTitle = config.title && config.title.trim() !== ""
         ? config.title
         : (input.project?.worktree ? input.project.worktree.split("/").pop() : "OpenCode");
@@ -170,6 +170,29 @@ const plugin = async (input, options) => {
                             `- **项目**：${projectTitle}`,
                             `- **会话**：${sessionTitle}`,
                             `- **主机**：${machineInfo}`,
+                        ].filter(Boolean).join("\n"),
+                    });
+                    return;
+                }
+                if (ev.type === "session.error" && notifyOn.has("error")) {
+                    const sessionID = ev.properties.sessionID ?? "";
+                    const errInfo = ev.properties.error;
+                    const errName = errInfo?.name ?? "UnknownError";
+                    const errMsg = errInfo?.data?.message ?? JSON.stringify(errInfo);
+                    const sessionTitle = sessionID
+                        ? await resolveSessionTitle(client, sessionID)
+                        : "";
+                    await notifyAll(config, {
+                        title: "❌ OpenCode 执行出错",
+                        content: [
+                            `#### ❌ OpenCode 执行出错`,
+                            ``,
+                            `- **错误类型**：\`${errName}\``,
+                            `- **错误信息**：${errMsg}`,
+                            `- **项目**：${projectTitle}`,
+                            sessionTitle ? `- **会话**：${sessionTitle}` : "",
+                            `- **主机**：${machineInfo}`,
+                            `- **时间**：${formatTime()}`,
                         ].filter(Boolean).join("\n"),
                     });
                     return;

@@ -25,7 +25,7 @@ const example = {
     enable: true,
     webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key",
   },
-  notifyOn: ["idle", "permission", "question"],
+  notifyOn: ["idle", "permission", "question", "error"],
   title: "",
 };
 
