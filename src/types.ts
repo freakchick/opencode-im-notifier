@@ -22,6 +22,8 @@ export interface NotifierConfig {
   wecom?: WeComConfig;
   notifyOn?: NotifyEvent[];
   title?: string;
+  /** 自定义配置文件路径，默认为自动查找 */
+  configFile?: string;
 }
 
 export interface NotificationMessage {

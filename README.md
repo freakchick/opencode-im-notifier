@@ -24,55 +24,95 @@ opencode plugin /path/to/opencode-im-notifier --global
 
 ## 配置
 
-在 `~/.config/opencode/opencode.jsonc`（或项目 `.opencode/opencode.jsonc`）中添加：
+配置有两种方式：**单独配置文件**（推荐）或 **opencode.jsonc 内联**。
+
+### 方式一：单独配置文件（推荐）
+
+在项目目录或全局配置目录创建 `opencode-im-notifier.json`：
+
+```json
+{
+  "dingtalk": {
+    "enable": true,
+    "webhook": "https://oapi.dingtalk.com/robot/send?access_token=xxx",
+    "secret": "SEC..."
+  },
+  "feishu": {
+    "enable": true,
+    "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+  },
+  "wecom": {
+    "enable": true,
+    "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
+  },
+  "notifyOn": ["idle", "permission", "question"],
+  "title": "我的项目"
+}
+```
+
+然后 `opencode.jsonc` 只需要注册插件，不需要写配置：
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["opencode-im-notifier"]
+}
+```
+
+插件会自动按以下顺序查找配置文件（先找到的生效）：
+
+| 优先级 | 路径 |
+|--------|------|
+| 1 | `opencode.jsonc` 中 `configFile` 字段指定的路径 |
+| 2 | `{项目目录}/opencode-im-notifier.json` |
+| 3 | `{项目目录}/.opencode/opencode-im-notifier.json` |
+| 4 | `~/.config/opencode/opencode-im-notifier.json` |
+
+### 方式二：opencode.jsonc 内联
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
     ["opencode-im-notifier", {
-      // 钉钉
       "dingtalk": {
         "enable": true,
         "webhook": "https://oapi.dingtalk.com/robot/send?access_token=xxx",
-        "secret": "SEC..."            // 可选，开启签名校验时需要
+        "secret": "SEC..."
       },
-      // 飞书
       "feishu": {
         "enable": true,
         "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
       },
-      // 企业微信
       "wecom": {
         "enable": true,
         "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx"
       },
-      "notifyOn": ["idle", "permission", "question"],   // 可选，默认全部
-      "title": "我的项目"                                  // 可选，自定义项目名称
+      "notifyOn": ["idle", "permission", "question"],
+      "title": "我的项目"
     }]
   ]
 }
 ```
 
+> 内联配置优先级高于文件配置，两者同时存在时内联会覆盖文件中的对应字段。
+
 ### 配置说明
 
-- **enable**：每个平台独立的开关，`true` 启用，`false` 关闭。不填时默认为 `true`（只要配置了 webhook）
-- **notifyOn**：全局控制哪些事件触发通知，可选值：`idle`、`permission`、`question`
+- **enable**：每个平台独立的开关，`true` 启用，`false` 关闭。不填时默认为 `true`
+- **notifyOn**：全局控制哪些事件触发通知，可选值：`idle`、`permission`、`question`，默认全部
 - **title**：通知中显示的项目名称，默认为工作目录名称
-- 三个平台可以任意组合，不互斥
 
 ### 最小配置（只用飞书）
 
-```jsonc
+`opencode-im-notifier.json`:
+
+```json
 {
-  "plugin": [
-    ["opencode-im-notifier", {
-      "feishu": {
-        "enable": true,
-        "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
-      }
-    }]
-  ]
+  "feishu": {
+    "enable": true,
+    "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/xxx"
+  }
 }
 ```
 
@@ -160,6 +200,7 @@ npm run build
 
 ```
 opencode-im-notifier/
+├── opencode-im-notifier.example.json   # 示例配置文件
 ├── package.json
 ├── tsconfig.json
 ├── README.md

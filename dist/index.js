@@ -1,3 +1,6 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { homedir } from "node:os";
 import { sendDingTalk } from "./notifiers/dingtalk.js";
 import { sendFeishu } from "./notifiers/feishu.js";
 import { sendWeCom } from "./notifiers/wecom.js";
@@ -50,8 +53,44 @@ async function resolveSessionTitle(client, sessionID) {
     }
     return sessionID;
 }
+const CONFIG_FILENAME = "opencode-im-notifier.json";
+async function loadConfigFile(path) {
+    try {
+        const content = await readFile(path, "utf-8");
+        return JSON.parse(content);
+    }
+    catch {
+        return null;
+    }
+}
+function mergeConfig(fileCfg, inlineCfg) {
+    if (!fileCfg)
+        return inlineCfg;
+    return {
+        dingtalk: inlineCfg.dingtalk ?? fileCfg.dingtalk,
+        feishu: inlineCfg.feishu ?? fileCfg.feishu,
+        wecom: inlineCfg.wecom ?? fileCfg.wecom,
+        notifyOn: inlineCfg.notifyOn ?? fileCfg.notifyOn,
+        title: inlineCfg.title ?? fileCfg.title,
+    };
+}
 const plugin = async (input, options) => {
-    const config = (options ?? {});
+    const inline = (options ?? {});
+    // 加载配置文件：自定义路径 > 项目目录 > 项目 .opencode/ > 全局配置
+    const worktree = input.project?.worktree ?? input.directory;
+    const candidates = [
+        inline.configFile || null,
+        worktree ? join(worktree, CONFIG_FILENAME) : null,
+        worktree ? join(worktree, ".opencode", CONFIG_FILENAME) : null,
+        join(homedir(), ".config", "opencode", CONFIG_FILENAME),
+    ].filter(Boolean);
+    let fileCfg = null;
+    for (const p of candidates) {
+        fileCfg = await loadConfigFile(p);
+        if (fileCfg)
+            break;
+    }
+    const config = mergeConfig(fileCfg, inline);
     const notifyOn = new Set(config.notifyOn ?? ["idle", "permission", "question"]);
     const projectTitle = config.title && config.title.trim() !== ""
         ? config.title
