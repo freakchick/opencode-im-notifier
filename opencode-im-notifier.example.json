@@ -13,5 +13,9 @@
     "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key"
   },
   "notifyOn": ["idle", "permission", "question", "error"],
+  "quietHours": {
+    "start": "22:00",
+    "end": "08:00"
+  },
   "title": ""
 }
