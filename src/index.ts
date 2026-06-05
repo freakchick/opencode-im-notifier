@@ -236,6 +236,8 @@ const plugin: Plugin = async (input, options) => {
           await notifyAll(config, {
             title: "✅ OpenCode 执行完成",
             content: [
+              `### ✅ OpenCode 执行完成`,
+              ``,
               lastUserQuestion ? `- **用户提问**：${lastUserQuestion}` : "",
               `- **项目**：${projectTitle}`,
               `- **会话**：${sessionTitle}`,
@@ -255,6 +257,8 @@ const plugin: Plugin = async (input, options) => {
           await notifyAll(config, {
             title: "🔐 OpenCode 需要授权",
             content: [
+              `### 🔐 OpenCode 需要授权`,
+              ``,
               lastUserQuestion ? `- **用户提问**：${lastUserQuestion}` : "",
               `- **操作**：\`${permission}\``,
               `- **指令**：\`${patterns.join(" ")}\``,
@@ -281,6 +285,8 @@ const plugin: Plugin = async (input, options) => {
           await notifyAll(config, {
             title: "❓ OpenCode 正在询问",
             content: [
+              `### ❓ OpenCode 正在询问`,
+              ``,
               lastUserQuestion ? `- **用户提问**：${lastUserQuestion}` : "",
               `- **问题**：${q.header || q.question}`,
               opts ? `- **选项**：${opts}` : "",
@@ -307,6 +313,8 @@ const plugin: Plugin = async (input, options) => {
           await notifyAll(config, {
             title: "❌ OpenCode 执行出错",
             content: [
+              `### ❌ OpenCode 执行出错`,
+              ``,
               lastUserQuestion ? `- **用户提问**：${lastUserQuestion}` : "",
               `- **错误类型**：\`${errName}\``,
               `- **错误信息**：${errMsg}`,

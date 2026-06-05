@@ -13,7 +13,7 @@ export async function sendFeishu(
       elements: [
         {
           tag: "markdown",
-          content: msg.content,
+          content: msg.content.replace(/^### .+\n\n?/, ""),
         },
       ],
     },
