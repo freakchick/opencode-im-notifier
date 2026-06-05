@@ -94,20 +94,25 @@ function formatTime(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-async function resolveSessionTitle(
+async function resolveSessionInfo(
   client: Record<string, unknown>,
   sessionID: string
-): Promise<string> {
+): Promise<{ title: string; parentID?: string }> {
   // Try client.session.get with directory hint
   try {
     const s = client.session as {
       get: (params: { sessionID: string; directory?: string; workspace?: string }) => Promise<{
-        data?: SessionInfo;
+        data?: SessionInfo & { parentID?: string };
       }>;
     };
     const res = await s.get({ sessionID });
-    const title = res?.data?.title;
-    if (title) return title;
+    const data = res?.data;
+    if (data?.title) {
+      return { title: data.title, parentID: data.parentID };
+    }
+    if (data) {
+      return { title: sessionID, parentID: data.parentID };
+    }
   } catch {
     // fallback
   }
@@ -115,19 +120,19 @@ async function resolveSessionTitle(
   // Try session.list to find the session by ID
   try {
     const sessionApi = client.session as {
-      list: (params?: { scope?: string }) => Promise<{ data?: SessionInfo[] }>;
+      list: (params?: { scope?: string }) => Promise<{ data?: (SessionInfo & { parentID?: string })[] }>;
     };
     const listRes = await sessionApi.list({ scope: "project" });
     const sessions = listRes?.data;
     if (Array.isArray(sessions)) {
       const found = sessions.find((s) => s.id === sessionID || s.id?.endsWith(sessionID));
-      if (found?.title) return found.title;
+      if (found) return { title: found.title ?? sessionID, parentID: found.parentID };
     }
   } catch {
     // fallback
   }
 
-  return sessionID;
+  return { title: sessionID };
 }
 
 const CONFIG_FILENAME = "opencode-im-notifier.jsonc";
@@ -231,7 +236,8 @@ const plugin: Plugin = async (input, options) => {
       try {
         if (ev.type === "session.idle" && notifyOn.has("idle")) {
           const sessionID = ev.properties.sessionID as string;
-          const sessionTitle = await resolveSessionTitle(client, sessionID);
+          const { title: sessionTitle, parentID } = await resolveSessionInfo(client, sessionID);
+          if (parentID) return;
 
           await notifyAll(config, {
             title: "✅ OpenCode 执行完成",
@@ -252,7 +258,7 @@ const plugin: Plugin = async (input, options) => {
           const sessionID = ev.properties.sessionID as string;
           const permission = ev.properties.permission as string;
           const patterns = ev.properties.patterns as string[];
-          const sessionTitle = await resolveSessionTitle(client, sessionID);
+          const { title: sessionTitle } = await resolveSessionInfo(client, sessionID);
 
           await notifyAll(config, {
             title: "🔐 OpenCode 需要授权",
@@ -279,7 +285,7 @@ const plugin: Plugin = async (input, options) => {
           }>;
           if (!questions || questions.length === 0) return;
           const q = questions[0];
-          const sessionTitle = await resolveSessionTitle(client, sessionID);
+          const { title: sessionTitle } = await resolveSessionInfo(client, sessionID);
           const opts = q.options?.map((o) => o.label).join(" / ") ?? "";
 
           await notifyAll(config, {
@@ -306,9 +312,10 @@ const plugin: Plugin = async (input, options) => {
           } | undefined;
           const errName = errInfo?.name ?? "UnknownError";
           const errMsg = errInfo?.data?.message ?? JSON.stringify(errInfo);
-          const sessionTitle = sessionID
-            ? await resolveSessionTitle(client, sessionID)
-            : "";
+          const { title: sessionTitle, parentID } = sessionID
+            ? await resolveSessionInfo(client, sessionID)
+            : { title: "", parentID: undefined };
+          if (parentID) return;
 
           await notifyAll(config, {
             title: "❌ OpenCode 执行出错",

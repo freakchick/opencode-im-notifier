@@ -56,14 +56,18 @@ function formatTime() {
     const pad = (n) => String(n).padStart(2, "0");
     return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
-async function resolveSessionTitle(client, sessionID) {
+async function resolveSessionInfo(client, sessionID) {
     // Try client.session.get with directory hint
     try {
         const s = client.session;
         const res = await s.get({ sessionID });
-        const title = res?.data?.title;
-        if (title)
-            return title;
+        const data = res?.data;
+        if (data?.title) {
+            return { title: data.title, parentID: data.parentID };
+        }
+        if (data) {
+            return { title: sessionID, parentID: data.parentID };
+        }
     }
     catch {
         // fallback
@@ -75,14 +79,14 @@ async function resolveSessionTitle(client, sessionID) {
         const sessions = listRes?.data;
         if (Array.isArray(sessions)) {
             const found = sessions.find((s) => s.id === sessionID || s.id?.endsWith(sessionID));
-            if (found?.title)
-                return found.title;
+            if (found)
+                return { title: found.title ?? sessionID, parentID: found.parentID };
         }
     }
     catch {
         // fallback
     }
-    return sessionID;
+    return { title: sessionID };
 }
 const CONFIG_FILENAME = "opencode-im-notifier.jsonc";
 const CONFIG_FILENAME_LEGACY = "opencode-im-notifier.json";
@@ -179,7 +183,9 @@ const plugin = async (input, options) => {
             try {
                 if (ev.type === "session.idle" && notifyOn.has("idle")) {
                     const sessionID = ev.properties.sessionID;
-                    const sessionTitle = await resolveSessionTitle(client, sessionID);
+                    const { title: sessionTitle, parentID } = await resolveSessionInfo(client, sessionID);
+                    if (parentID)
+                        return;
                     await notifyAll(config, {
                         title: "✅ OpenCode 执行完成",
                         content: [
@@ -198,7 +204,7 @@ const plugin = async (input, options) => {
                     const sessionID = ev.properties.sessionID;
                     const permission = ev.properties.permission;
                     const patterns = ev.properties.patterns;
-                    const sessionTitle = await resolveSessionTitle(client, sessionID);
+                    const { title: sessionTitle } = await resolveSessionInfo(client, sessionID);
                     await notifyAll(config, {
                         title: "🔐 OpenCode 需要授权",
                         content: [
@@ -220,7 +226,7 @@ const plugin = async (input, options) => {
                     if (!questions || questions.length === 0)
                         return;
                     const q = questions[0];
-                    const sessionTitle = await resolveSessionTitle(client, sessionID);
+                    const { title: sessionTitle } = await resolveSessionInfo(client, sessionID);
                     const opts = q.options?.map((o) => o.label).join(" / ") ?? "";
                     await notifyAll(config, {
                         title: "❓ OpenCode 正在询问",
@@ -242,9 +248,11 @@ const plugin = async (input, options) => {
                     const errInfo = ev.properties.error;
                     const errName = errInfo?.name ?? "UnknownError";
                     const errMsg = errInfo?.data?.message ?? JSON.stringify(errInfo);
-                    const sessionTitle = sessionID
-                        ? await resolveSessionTitle(client, sessionID)
-                        : "";
+                    const { title: sessionTitle, parentID } = sessionID
+                        ? await resolveSessionInfo(client, sessionID)
+                        : { title: "", parentID: undefined };
+                    if (parentID)
+                        return;
                     await notifyAll(config, {
                         title: "❌ OpenCode 执行出错",
                         content: [
