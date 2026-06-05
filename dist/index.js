@@ -4,7 +4,38 @@ import { homedir, hostname } from "node:os";
 import { sendDingTalk } from "./notifiers/dingtalk.js";
 import { sendFeishu } from "./notifiers/feishu.js";
 import { sendWeCom } from "./notifiers/wecom.js";
+function parseJSONC(text) {
+    const stripped = text
+        .split("\n")
+        .map((line) => {
+        // Remove full-line comments: optional whitespace then //
+        line = line.replace(/^\s*\/\/.*$/, "");
+        // Remove inline comments: // preceded by whitespace (avoid URLs like https://)
+        line = line.replace(/(\s)\/\/.*$/, "$1");
+        return line;
+    })
+        .join("\n");
+    return JSON.parse(stripped);
+}
+function isQuietHours(quietHours) {
+    if (!quietHours?.start || !quietHours?.end)
+        return false;
+    if (quietHours.start === quietHours.end)
+        return false;
+    const now = new Date();
+    const cur = now.getHours() * 60 + now.getMinutes();
+    const [sh, sm] = quietHours.start.split(":").map(Number);
+    const [eh, em] = quietHours.end.split(":").map(Number);
+    const start = sh * 60 + sm;
+    const end = eh * 60 + em;
+    if (start < end) {
+        return cur >= start && cur < end;
+    }
+    return cur >= start || cur < end;
+}
 async function notifyAll(config, msg) {
+    if (isQuietHours(config.quietHours))
+        return;
     const tasks = [];
     const dingEnabled = config.dingtalk && config.dingtalk.enable !== false;
     const feishuEnabled = config.feishu && config.feishu.enable !== false;
@@ -53,11 +84,12 @@ async function resolveSessionTitle(client, sessionID) {
     }
     return sessionID;
 }
-const CONFIG_FILENAME = "opencode-im-notifier.json";
+const CONFIG_FILENAME = "opencode-im-notifier.jsonc";
+const CONFIG_FILENAME_LEGACY = "opencode-im-notifier.json";
 async function loadConfigFile(path) {
     try {
         const content = await readFile(path, "utf-8");
-        return JSON.parse(content);
+        return parseJSONC(content);
     }
     catch {
         return null;
@@ -70,19 +102,23 @@ function mergeConfig(fileCfg, inlineCfg) {
         dingtalk: inlineCfg.dingtalk ?? fileCfg.dingtalk,
         feishu: inlineCfg.feishu ?? fileCfg.feishu,
         wecom: inlineCfg.wecom ?? fileCfg.wecom,
+        quietHours: inlineCfg.quietHours ?? fileCfg.quietHours,
         notifyOn: inlineCfg.notifyOn ?? fileCfg.notifyOn,
         title: inlineCfg.title ?? fileCfg.title,
     };
 }
 const plugin = async (input, options) => {
     const inline = (options ?? {});
-    // 加载配置文件：自定义路径 > 项目目录 > 项目 .opencode/ > 全局配置
+    // 加载配置文件：自定义路径 > 项目目录/ .opencode/ > 全局配置（支持 .jsonc 和 .json）
     const worktree = input.project?.worktree ?? input.directory;
     const candidates = [
         inline.configFile || null,
         worktree ? join(worktree, CONFIG_FILENAME) : null,
+        worktree ? join(worktree, CONFIG_FILENAME_LEGACY) : null,
         worktree ? join(worktree, ".opencode", CONFIG_FILENAME) : null,
+        worktree ? join(worktree, ".opencode", CONFIG_FILENAME_LEGACY) : null,
         join(homedir(), ".config", "opencode", CONFIG_FILENAME),
+        join(homedir(), ".config", "opencode", CONFIG_FILENAME_LEGACY),
     ].filter(Boolean);
     let fileCfg = null;
     for (const p of candidates) {
@@ -95,13 +131,31 @@ const plugin = async (input, options) => {
         const globalPath = join(homedir(), ".config", "opencode", CONFIG_FILENAME);
         try {
             await mkdir(join(homedir(), ".config", "opencode"), { recursive: true });
-            await writeFile(globalPath, JSON.stringify({
-                dingtalk: { enable: true, webhook: "https://oapi.dingtalk.com/robot/send?access_token=你的token", secret: "你的加签密钥（可选）" },
-                feishu: { enable: true, webhook: "https://open.feishu.cn/open-apis/bot/v2/hook/你的webhook" },
-                wecom: { enable: true, webhook: "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key" },
-                notifyOn: ["idle", "permission", "question", "error"],
-                title: "",
-            }, null, 2) + "\n", "utf-8");
+            await writeFile(globalPath, [
+                `{`,
+                `  "dingtalk": {`,
+                `    "enable": true,`,
+                `    "webhook": "https://oapi.dingtalk.com/robot/send?access_token=你的token",`,
+                `    "secret": "你的加签密钥（可选）"`,
+                `  },`,
+                `  "feishu": {`,
+                `    "enable": true,`,
+                `    "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/你的webhook"`,
+                `  },`,
+                `  "wecom": {`,
+                `    "enable": true,`,
+                `    "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key"`,
+                `  },`,
+                `  // 可选：静默时段，在此时间段内不发送通知`,
+                `  // start / end 格式：HH:mm（24小时制），留空或相同表示不启用`,
+                `  "quietHours": {`,
+                `    "start": "",    // 例如 "23:00"`,
+                `    "end": ""       // 例如 "09:00"`,
+                `  },`,
+                `  "notifyOn": ["idle", "permission", "question", "error"],`,
+                `  "title": ""`,
+                `}`,
+            ].join("\n") + "\n", "utf-8");
             console.error("[opencode-im-notifier] config file created:", globalPath);
         }
         catch { /* ignore */ }

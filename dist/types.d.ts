@@ -12,10 +12,15 @@ export interface WeComConfig {
     webhook: string;
 }
 export type NotifyEvent = "idle" | "permission" | "question" | "error";
+export interface QuietHoursConfig {
+    start: string;
+    end: string;
+}
 export interface NotifierConfig {
     dingtalk?: DingTalkConfig;
     feishu?: FeishuConfig;
     wecom?: WeComConfig;
+    quietHours?: QuietHoursConfig;
     notifyOn?: NotifyEvent[];
     title?: string;
     /** 自定义配置文件路径，默认为自动查找 */
