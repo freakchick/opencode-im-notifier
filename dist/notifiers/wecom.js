@@ -2,7 +2,7 @@ export async function sendWeCom(config, msg) {
     const body = {
         msgtype: "markdown",
         markdown: {
-            content: `${msg.title}\n${msg.content}`,
+            content: msg.content,
         },
     };
     const res = await fetch(config.webhook, {

@@ -107,6 +107,12 @@ function mergeConfig(fileCfg, inlineCfg) {
         title: inlineCfg.title ?? fileCfg.title,
     };
 }
+let lastUserQuestion = "";
+function truncate(text, max = 100) {
+    if (text.length <= max)
+        return text;
+    return text.slice(0, max) + "…";
+}
 const plugin = async (input, options) => {
     const inline = (options ?? {});
     // 加载配置文件：自定义路径 > 项目目录/ .opencode/ > 全局配置（支持 .jsonc 和 .json）
@@ -177,13 +183,12 @@ const plugin = async (input, options) => {
                     await notifyAll(config, {
                         title: "✅ OpenCode 执行完成",
                         content: [
-                            `### ✅ OpenCode 执行完成`,
-                            ``,
+                            lastUserQuestion ? `- **用户提问**：${lastUserQuestion}` : "",
                             `- **项目**：${projectTitle}`,
                             `- **会话**：${sessionTitle}`,
                             `- **主机**：${machineInfo}`,
                             `- **时间**：${formatTime()}`,
-                        ].join("\n"),
+                        ].filter(Boolean).join("\n"),
                     });
                     return;
                 }
@@ -195,14 +200,13 @@ const plugin = async (input, options) => {
                     await notifyAll(config, {
                         title: "🔐 OpenCode 需要授权",
                         content: [
-                            `### 🔐 OpenCode 需要授权`,
-                            ``,
+                            lastUserQuestion ? `- **用户提问**：${lastUserQuestion}` : "",
                             `- **操作**：\`${permission}\``,
                             `- **指令**：\`${patterns.join(" ")}\``,
                             `- **项目**：${projectTitle}`,
                             `- **会话**：${sessionTitle}`,
                             `- **主机**：${machineInfo}`,
-                        ].join("\n"),
+                        ].filter(Boolean).join("\n"),
                     });
                     return;
                 }
@@ -217,8 +221,7 @@ const plugin = async (input, options) => {
                     await notifyAll(config, {
                         title: "❓ OpenCode 正在询问",
                         content: [
-                            `### ❓ OpenCode 正在询问`,
-                            ``,
+                            lastUserQuestion ? `- **用户提问**：${lastUserQuestion}` : "",
                             `- **问题**：${q.header || q.question}`,
                             opts ? `- **选项**：${opts}` : "",
                             `- **项目**：${projectTitle}`,
@@ -239,8 +242,7 @@ const plugin = async (input, options) => {
                     await notifyAll(config, {
                         title: "❌ OpenCode 执行出错",
                         content: [
-                            `### ❌ OpenCode 执行出错`,
-                            ``,
+                            lastUserQuestion ? `- **用户提问**：${lastUserQuestion}` : "",
                             `- **错误类型**：\`${errName}\``,
                             `- **错误信息**：${errMsg}`,
                             `- **项目**：${projectTitle}`,
@@ -255,6 +257,14 @@ const plugin = async (input, options) => {
             catch (err) {
                 console.error("[opencode-im-notifier] event handler error:", err);
             }
+        },
+        "chat.message": async (_input, output) => {
+            const texts = output.parts
+                .filter((p) => p.type === "text")
+                .map((p) => p.text ?? "")
+                .join(" ");
+            if (texts)
+                lastUserQuestion = truncate(texts, 100);
         },
     };
 };

@@ -7,7 +7,7 @@ export async function sendWeCom(
   const body = {
     msgtype: "markdown",
     markdown: {
-      content: `${msg.title}\n${msg.content}`,
+      content: msg.content,
     },
   };
 
