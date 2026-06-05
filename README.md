@@ -135,7 +135,7 @@ opencode plugin /path/to/opencode-im-notifier --global
 
 ### 钉钉（markdown 消息）
 
-```
+```markdown
 ### ✅ OpenCode 执行完成
 
 - **项目**：我的项目
@@ -150,7 +150,7 @@ opencode plugin /path/to/opencode-im-notifier --global
 
 ### 企业微信（markdown 消息）
 
-```
+```markdown
 ### ✅ OpenCode 执行完成
 
 - **项目**：我的项目
