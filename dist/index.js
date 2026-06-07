@@ -276,7 +276,7 @@ const plugin = async (input, options) => {
         },
         "chat.message": async (_input, output) => {
             const texts = output.parts
-                .filter((p) => p.type === "text")
+                .filter((p) => p.type === "text" && !p.synthetic)
                 .map((p) => p.text ?? "")
                 .join(" ");
             if (texts)

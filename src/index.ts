@@ -339,7 +339,7 @@ const plugin: Plugin = async (input, options) => {
     },
     "chat.message": async (_input, output) => {
       const texts = output.parts
-        .filter((p: any) => p.type === "text")
+        .filter((p: any) => p.type === "text" && !p.synthetic)
         .map((p: any) => p.text ?? "")
         .join(" ");
       if (texts) lastUserQuestion = truncate(texts, 100);
