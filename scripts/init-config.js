@@ -5,9 +5,12 @@ import { homedir } from "node:os";
 
 const configDir = join(homedir(), ".config", "opencode");
 const configPath = join(configDir, "opencode-im-notifier.jsonc");
+const legacyConfigPath = join(configDir, "opencode-im-notifier.json");
 
-if (existsSync(configPath)) {
-  console.log("[opencode-im-notifier] config already exists:", configPath);
+// 避免生成的占位配置遮蔽用户已有的旧版 .json 配置
+if (existsSync(configPath) || existsSync(legacyConfigPath)) {
+  const existing = existsSync(configPath) ? configPath : legacyConfigPath;
+  console.log("[opencode-im-notifier] config already exists:", existing);
   process.exit(0);
 }
 

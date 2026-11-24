@@ -1,7 +1,7 @@
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { homedir, hostname } from "node:os";
-import type { Plugin } from "@opencode-ai/plugin";
+import { Plugin } from "@opencode/plugin";
 import type { NotifierConfig, NotificationMessage } from "./types.js";
 import { sendDingTalk } from "./notifiers/dingtalk.js";
 import { sendFeishu } from "./notifiers/feishu.js";
@@ -9,12 +9,24 @@ import { sendWeCom } from "./notifiers/wecom.js";
 
 interface SessionInfo {
   title?: string;
-  id?: string;
+  parentID?: string;
 }
 
 interface EventPayload {
   type: string;
-  properties: Record<string, unknown>;
+  data?: Record<string, unknown>;
+}
+
+interface FormField {
+  title?: string;
+  description?: string;
+  options?: Array<{ label?: string }>;
+}
+
+interface PluginContextLike {
+  session: {
+    get: (input: { sessionID: string }) => Promise<SessionInfo | undefined>;
+  };
 }
 
 function parseJSONC(text: string): unknown {
@@ -95,43 +107,18 @@ function formatTime(): string {
 }
 
 async function resolveSessionInfo(
-  client: Record<string, unknown>,
+  ctx: PluginContextLike,
   sessionID: string
 ): Promise<{ title: string; parentID?: string }> {
-  // Try client.session.get with directory hint
+  if (!sessionID) return { title: "" };
   try {
-    const s = client.session as {
-      get: (params: { sessionID: string; directory?: string; workspace?: string }) => Promise<{
-        data?: SessionInfo & { parentID?: string };
-      }>;
-    };
-    const res = await s.get({ sessionID });
-    const data = res?.data;
-    if (data?.title) {
-      return { title: data.title, parentID: data.parentID };
-    }
-    if (data) {
-      return { title: sessionID, parentID: data.parentID };
+    const session = await ctx.session.get({ sessionID });
+    if (session) {
+      return { title: session.title ?? sessionID, parentID: session.parentID };
     }
   } catch {
-    // fallback
+    // fall back to the raw session ID
   }
-
-  // Try session.list to find the session by ID
-  try {
-    const sessionApi = client.session as {
-      list: (params?: { scope?: string }) => Promise<{ data?: (SessionInfo & { parentID?: string })[] }>;
-    };
-    const listRes = await sessionApi.list({ scope: "project" });
-    const sessions = listRes?.data;
-    if (Array.isArray(sessions)) {
-      const found = sessions.find((s) => s.id === sessionID || s.id?.endsWith(sessionID));
-      if (found) return { title: found.title ?? sessionID, parentID: found.parentID };
-    }
-  } catch {
-    // fallback
-  }
-
   return { title: sessionID };
 }
 
@@ -159,192 +146,236 @@ function mergeConfig(fileCfg: NotifierConfig | null, inlineCfg: NotifierConfig):
   };
 }
 
-let lastUserQuestion = "";
-
 function truncate(text: string, max = 100): string {
   if (text.length <= max) return text;
   return text.slice(0, max) + "…";
 }
 
-const plugin: Plugin = async (input, options) => {
-  const inline = (options ?? {}) as NotifierConfig;
+const plugin = Plugin.define({
+  id: "opencode-im-notifier",
+  async setup(ctx) {
+    const inline = (ctx.options ?? {}) as NotifierConfig;
 
-  // 加载配置文件：自定义路径 > 项目目录/ .opencode/ > 全局配置（支持 .jsonc 和 .json）
-  const worktree = input.project?.worktree ?? input.directory;
-  const candidates = [
-    inline.configFile || null,
-    worktree ? join(worktree, CONFIG_FILENAME) : null,
-    worktree ? join(worktree, CONFIG_FILENAME_LEGACY) : null,
-    worktree ? join(worktree, ".opencode", CONFIG_FILENAME) : null,
-    worktree ? join(worktree, ".opencode", CONFIG_FILENAME_LEGACY) : null,
-    join(homedir(), ".config", "opencode", CONFIG_FILENAME),
-    join(homedir(), ".config", "opencode", CONFIG_FILENAME_LEGACY),
-  ].filter(Boolean) as string[];
+    // 加载配置文件：自定义路径 > 当前目录/项目目录的 .opencode/ > 全局配置（支持 .jsonc 和 .json）
+    const directory = ctx.location?.directory;
+    const project = ctx.location?.project;
+    const projectDirectory = project?.directory ?? project?.canonical ?? directory;
+    const roots = [...new Set([directory, projectDirectory].filter(Boolean))] as string[];
+    const candidates = [
+      inline.configFile || null,
+      ...roots.flatMap((root) => [
+        join(root, CONFIG_FILENAME),
+        join(root, CONFIG_FILENAME_LEGACY),
+        join(root, ".opencode", CONFIG_FILENAME),
+        join(root, ".opencode", CONFIG_FILENAME_LEGACY),
+      ]),
+      join(homedir(), ".config", "opencode", CONFIG_FILENAME),
+      join(homedir(), ".config", "opencode", CONFIG_FILENAME_LEGACY),
+    ].filter(Boolean) as string[];
 
-  let fileCfg: NotifierConfig | null = null;
-  for (const p of candidates) {
-    fileCfg = await loadConfigFile(p);
-    if (fileCfg) break;
-  }
+    let fileCfg: NotifierConfig | null = null;
+    for (const p of candidates) {
+      fileCfg = await loadConfigFile(p);
+      if (fileCfg) break;
+    }
 
-  // 如果没有任何配置文件，自动生成全局配置
-  if (!fileCfg && (!inline.dingtalk && !inline.feishu && !inline.wecom)) {
-    const globalPath = join(homedir(), ".config", "opencode", CONFIG_FILENAME);
-    try {
-      await mkdir(join(homedir(), ".config", "opencode"), { recursive: true });
-      await writeFile(globalPath, [
-        `{`,
-        `  "dingtalk": {`,
-        `    "enable": true,`,
-        `    "webhook": "https://oapi.dingtalk.com/robot/send?access_token=你的token",`,
-        `    "secret": "你的加签密钥（可选）"`,
-        `  },`,
-        `  "feishu": {`,
-        `    "enable": true,`,
-        `    "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/你的webhook"`,
-        `  },`,
-        `  "wecom": {`,
-        `    "enable": true,`,
-        `    "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key"`,
-        `  },`,
-        `  // 可选：静默时段，在此时间段内不发送通知`,
-        `  // start / end 格式：HH:mm（24小时制），留空或相同表示不启用`,
-        `  "quietHours": {`,
-        `    "start": "",    // 例如 "23:00"`,
-        `    "end": ""       // 例如 "09:00"`,
-        `  },`,
-        `  "notifyOn": ["idle", "permission", "question", "error"],`,
-        `  "title": ""`,
-        `}`,
-      ].join("\n") + "\n", "utf-8");
-      console.error("[opencode-im-notifier] config file created:", globalPath);
-    } catch { /* ignore */ }
-  }
-
-  const config = mergeConfig(fileCfg, inline);
-  const notifyOn = new Set(config.notifyOn ?? ["idle", "permission", "question", "error"]);
-  const projectTitle = config.title && config.title.trim() !== ""
-    ? config.title
-    : (input.project?.worktree ? input.project.worktree.split("/").pop()! : "OpenCode");
-  const machineInfo = hostname();
-  const client = input.client as unknown as Record<string, unknown>;
-
-  return {
-    event: async ({ event }) => {
-      const ev = event as unknown as EventPayload;
-
+    // 如果没有任何配置文件，自动生成全局配置
+    if (!fileCfg && (!inline.dingtalk && !inline.feishu && !inline.wecom)) {
+      const globalPath = join(homedir(), ".config", "opencode", CONFIG_FILENAME);
       try {
-        if (ev.type === "session.idle" && notifyOn.has("idle")) {
-          const sessionID = ev.properties.sessionID as string;
-          const { title: sessionTitle, parentID } = await resolveSessionInfo(client, sessionID);
-          if (parentID) return;
+        await mkdir(join(homedir(), ".config", "opencode"), { recursive: true });
+        await writeFile(globalPath, [
+          `{`,
+          `  "dingtalk": {`,
+          `    "enable": true,`,
+          `    "webhook": "https://oapi.dingtalk.com/robot/send?access_token=你的token",`,
+          `    "secret": "你的加签密钥（可选）"`,
+          `  },`,
+          `  "feishu": {`,
+          `    "enable": true,`,
+          `    "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/你的webhook"`,
+          `  },`,
+          `  "wecom": {`,
+          `    "enable": true,`,
+          `    "webhook": "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=你的key"`,
+          `  },`,
+          `  // 可选：静默时段，在此时间段内不发送通知`,
+          `  // start / end 格式：HH:mm（24小时制），留空或相同表示不启用`,
+          `  "quietHours": {`,
+          `    "start": "",    // 例如 "23:00"`,
+          `    "end": ""       // 例如 "09:00"`,
+          `  },`,
+          `  "notifyOn": ["idle", "permission", "question", "error"],`,
+          `  "title": ""`,
+          `}`,
+        ].join("\n") + "\n", "utf-8");
+        console.error("[opencode-im-notifier] config file created:", globalPath);
+      } catch { /* ignore */ }
+    }
 
-          await notifyAll(config, {
-            title: "✅ OpenCode 执行完成",
-            content: [
-              `### ✅ OpenCode 执行完成`,
-              ``,
-              lastUserQuestion ? `- **用户提问**：${lastUserQuestion}` : "",
-              `- **项目**：${projectTitle}`,
-              `- **会话**：${sessionTitle}`,
-              `- **主机**：${machineInfo}`,
-              `- **时间**：${formatTime()}`,
-            ].filter(Boolean).join("\n"),
-          });
-          return;
-        }
+    const config = mergeConfig(fileCfg, inline);
+    const notifyOn = new Set(config.notifyOn ?? ["idle", "permission", "question", "error"]);
+    const projectTitle = config.title && config.title.trim() !== ""
+      ? config.title
+      : (projectDirectory ? projectDirectory.split("/").pop()! : "OpenCode");
+    const machineInfo = hostname();
 
-        if (ev.type === "permission.asked" && notifyOn.has("permission")) {
-          const sessionID = ev.properties.sessionID as string;
-          const permission = ev.properties.permission as string;
-          const patterns = ev.properties.patterns as string[];
-          const { title: sessionTitle } = await resolveSessionInfo(client, sessionID);
+    // V2: 用户提问通过 session prompt hook 记录，按会话区分，避免多会话串扰
+    const questions = new Map<string, string>();
+    let lastQuestion = "";
+    await ctx.session.hook("prompt", (event) => {
+      const text = event.prompt.text?.trim();
+      if (text) {
+        lastQuestion = truncate(text, 100);
+        questions.set(event.sessionID, lastQuestion);
+      }
+    });
 
-          await notifyAll(config, {
-            title: "🔐 OpenCode 需要授权",
-            content: [
-              `### 🔐 OpenCode 需要授权`,
-              ``,
-              lastUserQuestion ? `- **用户提问**：${lastUserQuestion}` : "",
-              `- **操作**：\`${permission}\``,
-              `- **指令**：\`${patterns.join(" ")}\``,
-              `- **项目**：${projectTitle}`,
-              `- **会话**：${sessionTitle}`,
-              `- **主机**：${machineInfo}`,
-            ].filter(Boolean).join("\n"),
-          });
-          return;
-        }
+    const questionFor = (sessionID?: string): string =>
+      (sessionID ? questions.get(sessionID) : undefined) ?? lastQuestion;
 
-        if (ev.type === "question.asked" && notifyOn.has("question")) {
-          const sessionID = ev.properties.sessionID as string;
-          const questions = ev.properties.questions as Array<{
-            header?: string;
-            question: string;
-            options?: Array<{ label: string }>;
-          }>;
-          if (!questions || questions.length === 0) return;
-          const q = questions[0];
-          const { title: sessionTitle } = await resolveSessionInfo(client, sessionID);
-          const opts = q.options?.map((o) => o.label).join(" / ") ?? "";
+    // V2 中正常会话完成发 session.execution.succeeded；session.idle 仅作兼容，
+    // 两者可能先后到达，按会话做短窗口去重，避免重复通知。
+    const completionNotifiedAt = new Map<string, number>();
+    const notifyCompletion = async (sessionID: string): Promise<void> => {
+      const now = Date.now();
+      if (now - (completionNotifiedAt.get(sessionID) ?? 0) < 3000) return;
+      completionNotifiedAt.set(sessionID, now);
 
-          await notifyAll(config, {
-            title: "❓ OpenCode 正在询问",
-            content: [
-              `### ❓ OpenCode 正在询问`,
-              ``,
-              lastUserQuestion ? `- **用户提问**：${lastUserQuestion}` : "",
-              `- **问题**：${q.header || q.question}`,
-              opts ? `- **选项**：${opts}` : "",
-              `- **项目**：${projectTitle}`,
-              `- **会话**：${sessionTitle}`,
-              `- **主机**：${machineInfo}`,
-            ].filter(Boolean).join("\n"),
-          });
-          return;
-        }
+      const { title: sessionTitle, parentID } = await resolveSessionInfo(ctx, sessionID);
+      if (parentID) return;
 
-        if (ev.type === "session.error" && notifyOn.has("error")) {
-          const sessionID = (ev.properties.sessionID as string) ?? "";
-          const errInfo = ev.properties.error as {
-            name?: string;
-            data?: { message?: string };
-          } | undefined;
-          const errName = errInfo?.name ?? "UnknownError";
-          const errMsg = errInfo?.data?.message ?? JSON.stringify(errInfo);
-          const { title: sessionTitle, parentID } = sessionID
-            ? await resolveSessionInfo(client, sessionID)
-            : { title: "", parentID: undefined };
-          if (parentID) return;
+      await notifyAll(config, {
+        title: "✅ OpenCode 执行完成",
+        content: [
+          `### ✅ OpenCode 执行完成`,
+          ``,
+          questionFor(sessionID) ? `- **用户提问**：${questionFor(sessionID)}` : "",
+          `- **项目**：${projectTitle}`,
+          `- **会话**：${sessionTitle}`,
+          `- **主机**：${machineInfo}`,
+          `- **时间**：${formatTime()}`,
+        ].filter(Boolean).join("\n"),
+      });
+    };
 
-          await notifyAll(config, {
-            title: "❌ OpenCode 执行出错",
-            content: [
-              `### ❌ OpenCode 执行出错`,
-              ``,
-              lastUserQuestion ? `- **用户提问**：${lastUserQuestion}` : "",
-              `- **错误类型**：\`${errName}\``,
-              `- **错误信息**：${errMsg}`,
-              `- **项目**：${projectTitle}`,
-              sessionTitle ? `- **会话**：${sessionTitle}` : "",
-              `- **主机**：${machineInfo}`,
-              `- **时间**：${formatTime()}`,
-            ].filter(Boolean).join("\n"),
-          });
-          return;
+    const handleEvent = async (ev: EventPayload): Promise<void> => {
+      const data = ev.data ?? {};
+
+      if (
+        (ev.type === "session.execution.succeeded" || ev.type === "session.idle") &&
+        notifyOn.has("idle")
+      ) {
+        const sessionID = data.sessionID as string | undefined;
+        if (!sessionID) return;
+        await notifyCompletion(sessionID);
+        return;
+      }
+
+      if (ev.type === "permission.asked" && notifyOn.has("permission")) {
+        const sessionID = data.sessionID as string | undefined;
+        const action = typeof data.action === "string" ? data.action : "unknown";
+        const resources = Array.isArray(data.resources)
+          ? data.resources.map((r) => String(r))
+          : [];
+        const message = typeof data.message === "string" ? data.message : "";
+        const { title: sessionTitle } = await resolveSessionInfo(ctx, sessionID ?? "");
+
+        await notifyAll(config, {
+          title: "🔐 OpenCode 需要授权",
+          content: [
+            `### 🔐 OpenCode 需要授权`,
+            ``,
+            sessionID && questionFor(sessionID) ? `- **用户提问**：${questionFor(sessionID)}` : "",
+            `- **操作**：\`${action}\``,
+            resources.length ? `- **指令**：\`${resources.join(" ")}\`` : "",
+            !resources.length && message ? `- **说明**：${message}` : "",
+            `- **项目**：${projectTitle}`,
+            `- **会话**：${sessionTitle}`,
+            `- **主机**：${machineInfo}`,
+          ].filter(Boolean).join("\n"),
+        });
+        return;
+      }
+
+      // V2 中 AI 向用户提问以 form.created 事件发出（V1 为 question.asked）
+      if (ev.type === "form.created" && notifyOn.has("question")) {
+        const form = data.form as
+          | { sessionID?: string; title?: string; fields?: FormField[] }
+          | undefined;
+        if (!form) return;
+        const fields = Array.isArray(form.fields) ? form.fields : [];
+        const field = fields.find((f) => f.options?.length) ?? fields[0];
+        if (!field && !form.title) return;
+        const question = field?.title || field?.description || form.title || "问题";
+        const opts = field?.options
+          ?.map((o) => o.label)
+          .filter(Boolean)
+          .join(" / ");
+        const sessionID = form.sessionID;
+        const { title: sessionTitle } = await resolveSessionInfo(ctx, sessionID ?? "");
+
+        await notifyAll(config, {
+          title: "❓ OpenCode 正在询问",
+          content: [
+            `### ❓ OpenCode 正在询问`,
+            ``,
+            sessionID && questionFor(sessionID) ? `- **用户提问**：${questionFor(sessionID)}` : "",
+            `- **问题**：${question}`,
+            opts ? `- **选项**：${opts}` : "",
+            `- **项目**：${projectTitle}`,
+            `- **会话**：${sessionTitle}`,
+            `- **主机**：${machineInfo}`,
+          ].filter(Boolean).join("\n"),
+        });
+        return;
+      }
+
+      // V2 中 session.error 更名为 session.execution.failed
+      if (ev.type === "session.execution.failed" && notifyOn.has("error")) {
+        const sessionID = data.sessionID as string | undefined;
+        const err = data.error as { type?: string; message?: string } | undefined;
+        const errName = err?.type ?? "UnknownError";
+        const errMsg = err?.message ?? JSON.stringify(err);
+        const { title: sessionTitle, parentID } = await resolveSessionInfo(ctx, sessionID ?? "");
+        if (parentID) return;
+
+        await notifyAll(config, {
+          title: "❌ OpenCode 执行出错",
+          content: [
+            `### ❌ OpenCode 执行出错`,
+            ``,
+            sessionID && questionFor(sessionID) ? `- **用户提问**：${questionFor(sessionID)}` : "",
+            `- **错误类型**：\`${errName}\``,
+            `- **错误信息**：${errMsg}`,
+            `- **项目**：${projectTitle}`,
+            sessionTitle ? `- **会话**：${sessionTitle}` : "",
+            `- **主机**：${machineInfo}`,
+            `- **时间**：${formatTime()}`,
+          ].filter(Boolean).join("\n"),
+        });
+      }
+    };
+
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        for await (const event of ctx.event.subscribe({ signal: controller.signal })) {
+          try {
+            await handleEvent(event as unknown as EventPayload);
+          } catch (err) {
+            console.error("[opencode-im-notifier] event handler error:", err);
+          }
         }
       } catch (err) {
-        console.error("[opencode-im-notifier] event handler error:", err);
+        if (!controller.signal.aborted) {
+          console.error("[opencode-im-notifier] event stream error:", err);
+        }
       }
-    },
-    "chat.message": async (_input, output) => {
-      const texts = output.parts
-        .filter((p: any) => p.type === "text" && !p.synthetic)
-        .map((p: any) => p.text ?? "")
-        .join(" ");
-      if (texts) lastUserQuestion = truncate(texts, 100);
-    },
-  };
-};
+    })();
+
+    return () => controller.abort();
+  },
+});
 
 export default plugin;

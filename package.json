@@ -1,6 +1,6 @@
 {
   "name": "opencode-im-notifier",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "OpenCode plugin - send notifications to DingTalk, Feishu, WeCom groups when execution completes or asks for confirmation",
   "type": "module",
   "main": "dist/index.js",
@@ -21,7 +21,7 @@
     "postinstall": "node scripts/init-config.js"
   },
   "dependencies": {
-    "@opencode-ai/plugin": "*"
+    "@opencode/plugin": "2.3.2"
   },
   "devDependencies": {
     "@types/node": "^25.9.1",
